@@ -1156,6 +1156,7 @@ static int ngd_notify_slaves(void *data)
 	struct list_head *pos, *next;
 	int ret, i = 0;
 	ret = qmi_svc_event_notifier_register(SLIMBUS_QMI_SVC_ID,
+				SLIMBUS_QMI_SVC_V1,
 				SLIMBUS_QMI_INS_ID, &dev->qmi.nb);
 	if (ret) {
 		pr_err("Slimbus QMI service registration failed:%d", ret);
