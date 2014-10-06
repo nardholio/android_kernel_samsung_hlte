@@ -626,11 +626,6 @@ static int ngd_xferandwait_ack(struct slim_controller *ctrl,
 			ret = -ETIMEDOUT;
 		else
 			ret = txn->ec;
-	} else if (ret == -EREMOTEIO &&
-			(txn->mc == SLIM_USR_MC_CHAN_CTRL ||
-			 txn->mc == SLIM_USR_MC_DISCONNECT_PORT)) {
-		/* HW restarting, channel/port removal should succeed */
-		return 0;
 	}
 
 	if (ret) {
@@ -1483,6 +1478,7 @@ static int __devexit ngd_slim_remove(struct platform_device *pdev)
 		sysfs_remove_file(&dev->dev->kobj,
 				&dev_attr_debug_mask.attr);
 	qmi_svc_event_notifier_unregister(SLIMBUS_QMI_SVC_ID,
+				SLIMBUS_QMI_SVC_V1,
 				SLIMBUS_QMI_INS_ID, &dev->qmi.nb);
 	pm_runtime_disable(&pdev->dev);
 	if (!IS_ERR_OR_NULL(dev->mdm.ssr))

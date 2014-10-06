@@ -170,6 +170,9 @@ int mdss_mdp_overlay_req_check(struct msm_fb_data_type *mfd,
 		} else if (req->flags & MDP_BWC_EN) {
 			pr_err("Decimation can't be enabled with BWC\n");
 			return -EINVAL;
+		} else if (fmt->tile) {
+			pr_err("Decimation can't be enabled with MacroTile format\n");
+			return -EINVAL;
 		}
 	}
 
@@ -746,7 +749,7 @@ int mdss_mdp_overlay_get_buf(struct msm_fb_data_type *mfd,
 					   int num_planes,
 					   u32 flags)
 {
-	int i, rc;
+	int i, rc = 0;
 
 	if ((num_planes <= 0) || (num_planes > MAX_PLANES))
 		return -EINVAL;
@@ -770,6 +773,7 @@ int mdss_mdp_overlay_get_buf(struct msm_fb_data_type *mfd,
 			break;
 		}
 	}
+	mdss_bus_bandwidth_ctrl(0);
 
 	mdss_iommu_ctrl(0);
 	data->num_planes = i;
@@ -789,6 +793,7 @@ int mdss_mdp_overlay_free_buf(struct mdss_mdp_data *data)
 
 	for (i = 0; i < data->num_planes && data->p[i].len; i++)
 		mdss_mdp_put_img(&data->p[i]);
+	mdss_bus_bandwidth_ctrl(0);
 
 	mdss_iommu_ctrl(0);
 	data->num_planes = 0;
@@ -1254,35 +1259,34 @@ int mdss_mdp_overlay_release(struct msm_fb_data_type *mfd, int ndx)
 {
 	struct mdss_mdp_pipe *pipe, *tmp;
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
-	u32 unset_ndx = 0;
-	int destroy_pipe;
+	u32 pipe_ndx, unset_ndx = 0;
+	int i, destroy_pipe;
 
-	mutex_lock(&mdp5_data->list_lock);
-	list_for_each_entry_safe(pipe, tmp, &mdp5_data->pipes_used, list) {
-		if (pipe->ndx & ndx) {
-			if (mdss_mdp_pipe_map(pipe)) {
-				pr_err("Unable to map used pipe%d ndx=%x\n",
-						pipe->num, pipe->ndx);
+	for (i = 0; unset_ndx != ndx && i < MDSS_MDP_MAX_SSPP; i++) {
+		pipe_ndx = BIT(i);
+		if (pipe_ndx & ndx) {
+			unset_ndx |= pipe_ndx;
+			pipe = mdss_mdp_pipe_get(mdp5_data->mdata, pipe_ndx);
+			if (IS_ERR_OR_NULL(pipe)) {
+				pr_warn("unknown pipe ndx=%x\n", pipe_ndx);
 				continue;
 			}
 
-			unset_ndx |= pipe->ndx;
-
+			mutex_lock(&mfd->lock);
 			pipe->pid = 0;
 			destroy_pipe = pipe->play_cnt == 0;
 
-			if (destroy_pipe)
-				list_del_init(&pipe->list);
-			else
-				list_move(&pipe->list,
+			if (!list_empty(&pipe->used_list)) {
+				list_del_init(&pipe->used_list);
+				if (!destroy_pipe)
+					list_add(&pipe->cleanup_list,
 						&mdp5_data->pipes_cleanup);
-
+			}
+			mutex_unlock(&mfd->lock);
+			mdss_mdp_mixer_pipe_unstage(pipe);
 			mdss_mdp_pipe_unmap(pipe);
 			if (destroy_pipe)
 				mdss_mdp_pipe_destroy(pipe);
-
-			if (unset_ndx == ndx)
-				break;
 		}
 	}
 	mutex_unlock(&mdp5_data->list_lock);
